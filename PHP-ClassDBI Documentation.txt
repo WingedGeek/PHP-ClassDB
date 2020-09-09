@@ -1,0 +1,249 @@
+ClassDBI Documentation
+This documentation is a collection of notes; formal documentation to follow.
+
+Some assumptions: The first column is the primary key (if there is a primary key)
+Doesn't apply to link tables?
+
+Static:
+$pdo			The PHP Data Object used to connect to the database. Only one instance (one connection), hence, static (same object/connection used by all objects)
+
+Class:
+$table			Name of the table
+$allcolumns[]	Array of all column names (including foreign key columns)
+$has_many[]		Associative array:
+					'plural_attribute_name' => 'Object'
+					e.g. 'books' => 'Book'
+					Relies on mapping, e.g., if an Author has_many books, book.author_uuid used to find all the books an Author has.
+
+$has_many_through[]	Associative array:
+					Like has_many, but also specifies a link table
+					Song has_many Writers, Writer has_many Songs, linked through link_song_writer.
+					Writers.php: ->has_many_through('songs', 'Song', 'link_song_writer')
+					[ 'songs' => [ 'object' => 'Writer', 'linktable' => 'link_song_writer' ]
+
+
+
+$has_a[]		Associative array:
+					'attribute_name' => 'Object'
+					e.g. 'author' => 'Author'
+					Simple foreign key relationship. Author supplies table name ('author') and primary key name ('uuid') which is used to determine the column name for the foreign key ('author_uuid'). book.author_uuid is used to retrieve the Author where author.uuid = book.author_uuid.
+
+
+
+$primaryKey		The column that represents the primary key for this table (default: $allcolumns[0])
+$rowdata[]		//?
+$dirty			Boolean; has it been modified since retrieved from database?
+TODO:$not_in_database	Boolean; created outside of the database and not yet INSERT'Data
+$newPrimaryKeyCallbackFunction	Extensible way to generate/obtain primary key. Defaults to generateUUID() (see below).
+
+
+### Functions
+
+set_db($dsn, $user, $pass, $options = null)
+	Sets up the database connection
+	
+connection($dsn, $user, $pass, $options = null)
+	Stub that calls set_db() (probably for consistency with the Perl version?)
+
+getPDO( )
+	Returns $pdo
+
+instantiateWithRowData( $objectClass, $rowdata )
+	TODO
+	
+__construct( $dbparams, $cparams )
+	Constructor; calls:
+		$this->set_db( $dbparams['db']['dsn'], $dbparams['db']['user'], $dbparams['db']['pass'] )
+
+getNewPrimaryKey() {
+		$name = get_called_class();
+		$o = new $name();
+		return $o->generatePrimaryKey();
+
+generatePrimaryKey() {
+		$fname = $this->newPrimaryKeyCallbackFunction;
+		return $this->$fname();
+		
+setPrimaryKeyCallback( $name ) {
+		$cname = get_called_class();
+		if(!method_exists($cname, $name))
+			throw new \PDOException("method '$name()' does not exist in $cname", -1);
+		$this->newPrimaryKeyCallbackFunction = $name;
+
+getPrimaryKey() {
+		return $this->allcolumns[ $this->primaryKey ];
+
+insert( $data )
+	$data is an associative array, key => value, where key is a column name, value is the row data.
+	If the primary key column is present and populated, that will be used to create the new record. If it is not present or empty, 
+	
+	* Inserts new data into database, returns object representing the newly inserted row. If table has a single primary key column and that column value is not defined in $data[], insert() will generate it using the method specified in newPrimaryKeyCallbackFunction. If has_a is specified, an object of the appropriate type can be passed for that column
+
+
+
+buildInsertColumnsPlaceholdersData($darray )
+	For darray: ['uuid' => '7', 'name' => 'Astrid', 'breed' => 'Shar-Pei Mix' ]
+	Returns:
+	[
+		'columns' 		=> [ 'uuid', 'name', 'breed' ],
+		'placeholders'	=> '?, ?, ?',
+		'values'		=> [ '7', 'Astrid', 'Shar-Pei Mix' ]
+	]
+
+
+populate( $data )
+	Takes an associative array of [ 'column_name' => 'value', ... ]
+	Populates ->rowdata
+	Throws an exception if trying to populate a column not specified in ->allcolumns (i.e., with ->column() )
+	
+
+
+retrieve( $primarykey )
+	Retrieve row data and return a containing object for the specified primary key.
+	Throws exception if row not found.
+	
+
+buildAllColumnNamesSQL()
+	Returns a string containing each column in ->allcolumns
+	E.g., if an object has columns 'uuid', 'name', 'password', this returns: 'uuid, name, password'
+	
+
+buildAllColumnPlaceholders()
+	Returns a string with a placeholder for each column in ->allcolumns
+	E.g., if an object has columns 'uuid', 'name', 'password', this returns: '?, ?, ?'
+
+
+table( $table = null )
+	Gets/sets the table name associated with this object
+
+
+primaryKey( $pkey = null )
+	Gets/sets the primary key column name for the object.
+	
+
+columns( $col_array = null )
+	if optional $col_array is set and contains an 'all' key with a populated array of column names (e.g. [ 'all' => [ 'col1', 'col2' ...]]), populates ->allcolumns and sets ->primaryKey to the first element in that array.
+	Otherwise, returns an array of the column names specified for this object (->allcolumns)
+
+
+
+has_many_through( $name, $className, $linktable )
+	See has_many with optional linktable
+	E.g., a Song can have many Writers, and a Writer can have many Songs.
+	Writer: ->has_many('songs', 'Song', 'link_song_writer')
+
+
+has_many( $name, $className [, $linktable )
+	Specifies a has_many relationship, e.g., an Author has_many 'books'
+	get('books') will return an array of that Author's Book objects.
+	->has_many('books', 'Book')
+	If the optional 'linktable' is specified, calls has_many_through().
+	
+
+
+has_a( $name, $className )
+	Specifies a relationship, e.g., a Book has_a 'author', and asking for a book's author will return an Author object: ->has_a('author', 'Author')
+
+
+
+fetchAll( [orderclause] )
+	Retrieves all rows (objects) for a table (class).
+	Optional order clause (e.g., 'AGE ASC')
+	Calls ->buildAllColumnNamesSQL() to generate a list of all the columns to retrieve.
+	Uses ->populate() to, well, populate the instantiated object with the retrieved rowdata.
+	Returns an array of objects.
+
+
+search( $term_val_array [, $orderclause] )
+	Takes an associative array of column names and values, and an optional orderclause.
+	If a value has a trailing or leading '%' wildcard, searches for LIKE, else, =.
+	E.g.: [ 'name' => 'Smith%', 'age' => '52' ]
+		SELECT name, age FROM people WHERE name LIKE 'Smith%' AND age = 52
+	If present, the orderclause (e.g., 'NAME ASC') gets appended to the end:
+		SELECT ... ORDER BY NAME ASC'
+	Returns an array of objects (if any) matching the specified criteria.
+	
+
+buildPlaceHolder( $assocArray, $internal, $glue )
+	Returns an associative array, containing the keys and values of the passed assocArray:
+		placeholder => 'key1[internal]?[glue]key2[internal]?[glue]...' e.g., for glue=", " and internal=" = ": 'key1 = ?, key2 = ?'
+		values => [ val1, val2 ...]
+
+
+update()
+	If an object is 'dirty' (contains uncommitted changes):
+		Uses buildPlaceHolder() to build a placeholder query string ("UPDATE <table> SET col1 = ?, col2 = ? ...")
+		Executes the SQL UPDATE query.
+		
+
+		
+delete()
+	Builds and executes a simple "DELETE FROM [table] WHERE [primary_key] = [this->id()]" query.
+	Does not cascade through has_a, has_many, etc., relationships. (Should it?)
+
+
+
+getTableNameAndPrimaryKey( $objectName )
+	Utility function. For a class (e.g.,' Book'):
+		Instantiate a new instance of that class (Book)
+		Determine the table name for that class (book)
+		Determines the primary key name for that class (uuid)
+		Returns the table and primary key ("book_uuid") as a column name
+
+
+
+get( $name )
+	If $name (e.g. "author") is a key in the $has_a[] for this class:
+		e.g. Book.php: $this->has_a('author', 'Author');
+		Call getTableNameAndPrimaryKey() with the class (e.g. Author) specified for this relationship
+		Use the returned column name (author_uuid) to retrieve() and return an object of (e.g.) Author class populated with the row data for author where uuid = foreign key.
+	Else if $name is a key in the $has_many[] for this class:
+		TODO - handle link tables
+			e.g. link_book_note, Books.php: $this->has_many_through("notes", "Note", "link_book_note")
+			Search link_book_note for this->table_this->primaryKey, get list of linked note UUIDs.
+			do a multi-element retrieve on the linked table.
+			
+		Current:
+			e.g., Author.php: $this->has_many('books', 'Book');
+			search_column = this->table (book) + "_" + this->primaryKey (uuid): book_uuid
+			search_value = this row's primary key (eg 117952ee-8aa9-4673-8f4f-687f50e62f32)
+			Returns the results of ->search() called on the specified class (Book), with the parameters being search_column => search_value.
+	
+	Else if $name is in ->allcolumns[]
+		Return the scalar value from $rowdata[]
+	Else
+		Throw exception (E0001).
+
+	
+
+set($name, $value)
+	If a scalar, sets the column data for $name to the supplied $value.
+	If a has_a:
+		Takes the passed object (e.g. Author) and determines the table name (author) and primary key name (uuid).
+		Recursively calls set() with the foreign key column name and the primary key (id) value of the passed object (->id()), e.g.:
+		->set('author_uuid', '99d17294-8a7d-49a0-8373-feb923142196')
+	If a has_many, undefined, throw exception E0002
+	If $name doesn't exist as a column, has_a, or has_many, throw exception E0003.
+
+
+sanityCheck()
+	Not sure; throws exceptions in some circumstances
+	
+generateUUID()
+	Creates a universally unique identifier, v4, a 36-character string like:
+	d4e3e7cc-1f4f-41e9-b242-65b3f228b606
+	
+	
+	
+Exceptions:
+E0001	get( $name )	Not defined
+E0002	set()	Not defined for has_many relationships
+E0003	set()	Not defined (generic)
+E0004	sanityCheck()	Table cannot be null
+E0005	sanityCheck()	Columns array cannot be empty
+E0006	set_db()	See error message (likely database connection issue)
+E0007	__construct()	See error message (likely database connection issue from set_db)
+E0008	setPrimaryKeyCallback()	The specified method does not exist for the object
+E0009	populate()	Attempting to populate non-existent column
+E0010	retrieve()	No row matches supplied primary key
+E0011   generateUUID()  Unable to create a UUID value
