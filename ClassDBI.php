@@ -1,11 +1,11 @@
 <?php
 /**
- * Version 0.1
+ * Version 0.1a
  * Heavily inspired by, and loosely sharing the API (but no code) from, Class::DBI
  * 	(https://metacpan.org/pod/Class::DBI)
  * User: WingedGeek
- * Date: 4/4/20
- * Time: 12:28 AM
+ * Date: March 15, 2022
+ * Time: 17:02
  */
 
 //namespace ClassDBI;
@@ -13,6 +13,8 @@
 class ClassDBI
 {
 	private static $pdo;    // Shared across all instances of ClassDBI and subclasses (i.e., table objects)
+	private static  $trim = false;	// Set by default when specifying a SQLite back end, strings will be trim()'d before being returned.
+
 	private $table = null;    // Distinct to each instantiation of this class or subclasses
 	private $allcolumns = array();
 	private $has_many = array();    // 'column' => 'table class', e.g., 'books' => 'Book'.
@@ -98,6 +100,11 @@ class ClassDBI
 		//$retval = call_user_func(array($objectClass,'__construct'));
 		// TODO
 		// print get_class();
+		
+		// If rowdata includes primatry key, use it, else, use the callback function to generate one
+		// Instantiate new row and use ->set() to populate.
+		
+		
 	}
 
 
@@ -221,7 +228,7 @@ class ClassDBI
 
 
 		$ocname = get_called_class();
-		self::debug($ocname . "::insert() called with insdata: " . print_r($insdata, true) . ", suppress_primary_key: " . print_r($suppress_primary_key, true));
+		// self::debug($ocname . "::insert() called with insdata: " . print_r($insdata, true) . ", suppress_primary_key: " . print_r($suppress_primary_key, true));
 
 		/* @var $obj ClassDBI */        // Eliminates "method 'primaryKey not found in ... Referenced method not found in subject class." warning in PhpStorm
 		$obj = new $ocname();
@@ -231,7 +238,7 @@ class ClassDBI
 
 		// If primary key creation is not suppressed:
 		if( $suppress_primary_key === false ) {
-			self::debug("Populating primary key...");
+			// self::debug("Populating primary key...");
 			$pk = $obj->primaryKey();
 			// If primary key is not included in $data (or is null or empty), generate a new one using
 			// specified callback method:
@@ -470,11 +477,13 @@ class ClassDBI
 	 * @param  string $oc An order by clause; e.g., if $oc = "NAME ASC", the SQL query will terminate in "ORDER BY NAME ASC"
 	 * @return ClassDBI[] ClassDBI objects, each representing one row of data
 	 */
-	public static function fetchAll($oc = null)
+	public static function fetchAll($oc = null, $wc = null)
 	{
-		$orderclause = (func_num_args() == 1 || $oc !== null) ? $oc : "";
+		$orderclause = (func_num_args() > 0 || $oc !== null) ? $oc : "";
 		//$this->sanityCheck( array('table', 'columns') );
-		//
+		
+		$whereclause = (func_num_args() == 2 || $wc !== null) ? $wc : "";
+		
 		$retval = array();
 
 		$name = get_called_class();
@@ -482,6 +491,8 @@ class ClassDBI
 		$o = new $name();
 
 		$SQL = "SELECT " . $o->buildAllColumnNamesSQL() . " FROM " . $o->table();
+		if (strlen($whereclause) > 1)
+			$SQL .= " WHERE $whereclause";
 		if (strlen($orderclause) > 1)
 			$SQL .= " ORDER BY $orderclause";
 		/* @var PDO $pdo */
@@ -607,6 +618,23 @@ class ClassDBI
 
 		return $retval;
 	}
+
+    /**
+     * Quick and dirty way to run custom SQL. Try to avoid this, naturally, but sometimes needs must.
+	 * // TODO look at Class::DBI for syntax as to how to handle more elegantly.
+     * @return associative array, { $col => $val, ... }
+     */
+	public function runSQL( $sql, $values = [] ) {
+		$pdo = $this->getPDO();
+		$stmt = $pdo->prepare( $sql );
+		$stmt->execute( $values );
+        $retval = array();
+        while($row = $stmt->fetch()) {
+            array_push($retval, $row) ;
+        }
+        return $retval;
+    }
+
 
 	function get_include_path() {
 		return __DIR__ . DIRECTORY_SEPARATOR . get_parent_class($this) . DIRECTORY_SEPARATOR;  // /home/user/lib/DBBackEnd/
@@ -913,7 +941,8 @@ class ClassDBI
 	}
 
 	public static function debug( $message ) {
-		file_put_contents( "/home/kpgsaa/cgi_debug.log", date("Y-m-d H:i:s") . "\t" . $message . "\n", FILE_APPEND | LOCK_EX );
+		$tempfile = tmpfile();
+		file_put_contents( $tempfile, date("Y-m-d H:i:s") . "\t" . $message . "\n", FILE_APPEND | LOCK_EX );
 	}
 
 
